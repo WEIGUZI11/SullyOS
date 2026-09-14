@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildChatRequestPayload } from './chatRequestPayload';
 import type { BuildChatPayloadInput } from './chatRequestPayload';
 import { RealtimeContextManager } from './realtimeContext';
+import { installSARModuleOnCharacter, installSARModuleOnUser } from './vrWorld/sarModuleRuntime';
+import { SAR_MODULE_CATALOG } from './vrWorld/sarModuleShop';
 
 // 即时对话（这一轮交给用户自己的 amsg worker 生成）那份 prompt 里，凡是 worker 到点
 // 会自己补一遍的时效段，前端就不再烤进去：当前时间块、【真实世界感知系统】（节日 /
@@ -235,6 +237,57 @@ describe('timelyByWorker —— 时效段交给 worker，前端这份不重复�
         expect(joined).toContain('不要用“别想了”“回来就好”“一切都会过去”');
         expect(joined).not.toContain('### 此刻的交流深度');
     });
+
+    it('角色和 User 都没有模块时，Chat prompt 不增加 SAR 文本或输出容器', async () => {
+        const payload = await buildChatRequestPayload({
+            ...baseInput(),
+            char: {
+                id: 'char-sar-empty',
+                name: '测试角色',
+                memoryPalaceEnabled: false,
+                vrState: { enabled: true, intervalMinutes: 120 },
+            } as any,
+            userProfile: { ...userProfile, vrState: { enabled: true } } as any,
+            recallEntryPoint: 'chat_app',
+        });
+        const joined = joinMessages(payload.fullMessages);
+
+        expect(payload.flags.sarModuleActive).toBe(false);
+        expect(joined).not.toContain('### SAR 临时模块');
+        expect(joined).not.toContain('<SAR_MODULE_OUTPUT>');
+        expect(joined).not.toContain('[SAR MODULE REMINDER:');
+    });
+
+    it('SAR 与内置翻译同时开启时，以 SAR 为外层、翻译标签留在两个内容字段内', async () => {
+        const runtime = installSARModuleOnCharacter(SAR_MODULE_CATALOG[0], 1);
+        const payload = await buildChatRequestPayload({
+            ...baseInput(),
+            char: {
+                id: 'char-sar-bilingual',
+                name: '测试角色',
+                memoryPalaceEnabled: false,
+                vrState: { enabled: true, intervalMinutes: 120, sarModule: runtime },
+            } as any,
+            userProfile: { ...userProfile, vrState: { enabled: true } } as any,
+            historyMsgs: [{
+                id: 201,
+                charId: 'char-sar-bilingual',
+                role: 'user',
+                type: 'text',
+                content: '你怎么说话怪怪的？',
+                timestamp: Date.now(),
+            }] as any[],
+            recallEntryPoint: 'chat_app',
+            translationConfig: { enabled: true, sourceLang: '日语', targetLang: '中文' },
+        });
+        const joined = joinMessages(payload.fullMessages);
+
+        expect(payload.flags.sarModuleActive).toBe(true);
+        expect(payload.flags.bilingualActive).toBe(true);
+        expect(joined).toContain('最外层必须是 <SAR_MODULE_OUTPUT>');
+        expect(joined).toContain('CHAR_TRUE 和 CHAR_SURFACE 内的每个气泡');
+        expect(joined).toContain('原文/译文语义一致');
+    });
 });
 
 describe('volatileTailIndex —— 想插在钢印之前的块按它定位', () => {
@@ -249,4 +302,14 @@ describe('volatileTailIndex —— 想插在钢印之前的块按它定位', () 
         // 它前面一条是本轮用户消息（前缀缓存的断点在那儿，插入不影响命中）
         expect(payload.fullMessages[payload.volatileTailIndex - 1]?.role).toBe('user');
     });
+});
+
+it('ChatApp user modules explicitly identify the pending messages without changing other callers', async () => {
+    const input = baseInput();
+    input.userProfile = { ...input.userProfile, vrState: { enabled: true, sarModule: installSARModuleOnUser(SAR_MODULE_CATALOG[0], input.char, 1) } } as any;
+    const chat = await buildChatRequestPayload({ ...input, recallEntryPoint: 'chat_app' });
+    const request = chat.fullMessages.find(m => typeof m.content === 'string' && m.content.startsWith('USER_SURFACE 的聊天专用格式'));
+    expect(request?.content).toContain(JSON.stringify(input.historyMsgs.map(({ id, content }) => ({ id, content }))));
+    const other = await buildChatRequestPayload(input);
+    expect(joinMessages(other.fullMessages)).not.toContain('USER_SURFACE 的聊天专用格式');
 });

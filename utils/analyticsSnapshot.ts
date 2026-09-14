@@ -1,3 +1,7 @@
+import { loadChatInputPreferences } from './chatInputPreferences';
+import { readSARClubState, sarRoomView } from './vrWorld/sarClub';
+import { ANNIVERSARY_SEEN_KEY } from './anniversaryGifts';
+import { readFishingMarketState } from './vrWorld/fishingMarket';
 /**
  * 使用统计 · 会话级快照的收集层。
  *
@@ -375,6 +379,43 @@ function hasLocalJsonConfig(key: string): boolean {
     } catch {
         return false;
     }
+}
+
+/** 存档内已完成 + 当前未完成的剧情去重；回顾不会增加数量，不收剧情 ID。 */
+function collectSARDialogueCounts(): Record<string, string> {
+    try {
+        const npcs = readFishingMarketState().sarFamiliarity?.npcs;
+        const count = (npc: 'caian' | 'aiven'): string => {
+            const progress = npcs?.[npc];
+            const ids = new Set(Object.keys(progress?.completed || {}));
+            if (progress?.pending?.sceneId) ids.add(progress.pending.sceneId);
+            const n = ids.size;
+            return n === 0 ? '0' : n <= 5 ? '1–5' : n <= 10 ? '6–10' : n <= 20 ? '11–20'
+                : n <= 30 ? '21–30' : n <= 40 ? '31–40' : '41+';
+        };
+        return { 凯恩已触发对话数: count('caian'), 艾文已触发对话数: count('aiven') };
+    } catch {
+        // 坏档或存储不可读不应变成「没玩过」，也不能阻断其他快照。
+        return { 凯恩已触发对话数: '读取失败', 艾文已触发对话数: '读取失败' };
+    }
+}
+
+/** SAR 发布功能单独参与冷启动轮转，不加宽原有功能快照。 */
+export function collectSARFeatureFlags(): Record<string, string> {
+    const input = loadChatInputPreferences();
+    const sar = readSARClubState();
+    return {
+        // ── SAR / 输入习惯 / 周年赠礼：只上报固定状态 ──
+        发送键生成: onOff(input.sendButtonGenerates),
+        回车发送: onOff(input.enterToSend),
+        自动回复: onOff(input.autoReply),
+        SAR角色: sar.npcPreference === 'show' ? '开' : sar.npcPreference === 'hide' ? '关' : '未选择',
+        SAR房间显示: sarRoomView(sar) === 'names-hidden' ? '隐藏名字' : sarRoomView(sar) === 'text-hidden' ? '隐藏文字' : sarRoomView(sar) === 'characters-hidden' ? '隐藏角色' : '全部显示',
+        SAR简易钓鱼: isLocalFlagOn('vr_fishing_simple_mode', 'true') ? '开' : '关',
+        SAR对话配色: isLocalFlagOn('vr_sar_session_theme_v1', 'dark') ? '深色' : '浅色',
+        周年赠礼已阅: isLocalFlagOn(ANNIVERSARY_SEEN_KEY, '1') ? '是' : '否',
+        ...collectSARDialogueCounts(),
+    };
 }
 
 /** OSContext 手上有、这里读不到的那部分状态。 */
