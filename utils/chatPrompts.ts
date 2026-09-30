@@ -322,9 +322,13 @@ export const ChatPrompts = {
         // 记忆宫殿检索结果现在从 char.memoryPalaceInjection 读取。
         // deferVolatile：时间/宫殿召回/情绪 buff 三块不进 stable，由下面的 volatileState 承接。
         const coreT0 = performance.now();
+        const config = realtimeConfig || defaultRealtimeConfig;
+        if (!forFirePack && !timelyByWorker && char.timeAwarenessEnabled !== false && config.userHolidays?.enabled) {
+            await RealtimeContextManager.getUserHoliday(config, userProfile.name);
+        }
         const context = ContextBuilder.buildCharacterContext({
             char, user: userProfile, history: promptOptions?.history,
-            timeOptions: { worldbookMessages: currentMsgs },
+            timeOptions: { worldbookMessages: currentMsgs, userHolidays: config.userHolidays, skipUserHoliday: forFirePack || timelyByWorker },
             layout: { deferVolatile: true },
         });
         let baseSystemPrompt = context.coreContext;
@@ -343,7 +347,6 @@ export const ChatPrompts = {
 
         // ── 并发发起所有独立的异步取数（网络 + IndexedDB），下面按原顺序拼接 ──
         // 原来是 7 段串行 await，总耗时 = 各段之和；现在取 max。
-        const config = realtimeConfig || defaultRealtimeConfig;
         // 自定义时区：日历日、当前日程与实时上下文全部按角色所在地折算。
         const charTz = resolveCharTimeZone(char);
         const charNow = nowInTimeZone(charTz);
@@ -1003,7 +1006,7 @@ ${xhsEnabled ? `${[notionEnabled, feishuEnabled, notionNotesEnabled].filter(Bool
 
 用户开启了语音消息功能，语音语种为：${langLabel}（${voiceLang}）。
 
-**你可以发送语音消息！** 就像真人用微信一样，你可以选择打字或者发语音。
+**你可以发送语音消息！** 就像真人用微信一样，你可以选择打字或者发语音。整轮只回复一次，不要让文字和语音各自回答一遍同一条用户消息。
 发语音用两个标签成对写：\`<语音>${langLabel}台词</语音>\` 紧跟 \`<字幕>中文字幕</字幕>\`。
 <语音> 里是真正被朗读的${langLabel}，<字幕> 里是同一段话的中文——语音条的「转文字」面板会直接用它当对照翻译，用户对着中文听${langLabel}。
 
@@ -1033,6 +1036,7 @@ ${voiceActingGuide()}`;
                 baseSystemPrompt += `\n\n### 🎤 语音消息功能
 
 用户开启了语音消息功能。
+整轮回复只构思一次：语音是这轮消息中的一种气泡，不是额外再独立回复一遍。先决定每句话用文字还是语音，同一个信息只发一次；语音已有内置转文字，无需在标签外抄写或改写语音内容。
 
 **你可以发送语音消息！** 就像真人用微信一样，你可以选择打字或者发语音。
 用 \`<语音>要说的话</语音>\` 标签来发送语音。标签里的内容会被转成真正的语音条显示给用户。

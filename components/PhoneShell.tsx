@@ -1,5 +1,6 @@
 import FirstUseGuide from './FirstUseGuide';
 import FeedbackInvitation from './FeedbackInvitation';
+import BeautyRepoInvitation from './share/BeautyRepoInvitation';
 import { useFirstUseGuideStep } from '../utils/firstUseGuide';
 import AnniversaryGiftPopup from './os/AnniversaryGiftPopup';
 import { shouldShowAnniversaryGift, markAnniversaryGiftSeen } from '../utils/anniversaryGifts';
@@ -29,7 +30,7 @@ const Settings = lazyApp(() => import('../apps/Settings'));
 const Character = lazyApp(() => import('../apps/Character'));
 const Chat = lazyApp(() => import('../apps/Chat'));
 const GroupChat = lazyApp(() => import('../apps/GroupChat'));
-const ThemeMaker = lazyApp(() => import('../apps/ThemeMaker'));
+const ThemeMaker = lazyApp(() => import('./chat/LegacyBubbleMakerEntry'));
 const Appearance = lazyApp(() => import('../apps/Appearance'));
 const Gallery = lazyApp(() => import('../apps/Gallery'));
 const DateApp = lazyApp(() => import('../apps/DateApp'));
@@ -1030,11 +1031,12 @@ const PhoneShell: React.FC = () => {
               错误指示器、系统调试终端与开关无关、始终在。 */}
           <StatusBar />
           
-          {/* Overlays: Suspended Call Bar */}
+          {/* 通话条跟随安全区和状态栏高度，避免被灵动岛遮挡；无安全区时保留原来的顶部间距。 */}
           {suspendedCall && activeApp !== AppID.Call && (
             <button
               onClick={resumeCall}
-              className="absolute top-7 left-0 w-full z-[55] flex items-center justify-center gap-2 bg-emerald-500 text-white text-xs font-bold py-1.5 animate-pulse cursor-pointer active:bg-emerald-600 transition-colors"
+              className="absolute left-0 w-full z-[55] flex items-center justify-center gap-2 bg-emerald-500 text-white text-xs font-bold py-1.5 animate-pulse cursor-pointer active:bg-emerald-600 transition-colors"
+              style={{ top: 'max(1.75rem, calc(var(--chrome-top, 1.5rem) + 0.25rem))' }}
             >
               <span className="w-2 h-2 rounded-full bg-white animate-ping" />
               <span>通话中 · {suspendedCall.charName}</span>
@@ -1118,6 +1120,10 @@ const PhoneShell: React.FC = () => {
          blocked={activeApp !== AppID.Launcher || !!suspendedCall || !!errorDialog || sysOperation.status !== 'idle' || anniversaryHasPriority || showDisclaimer || showImportRecoveryPrompt || showAuthorLetter || showUpdateNotification || shouldShowUpdateNotification() || showQixiLaunchPopup || showLike520Popup || showBackupReminder}
        />
 
+       <BeautyRepoInvitation
+         ready={isDataLoaded && !isLocked && (bootDone || !bootAnimationEnabled)}
+         blocked={activeApp !== AppID.Launcher || !!suspendedCall || !!errorDialog || sysOperation.status !== 'idle' || anniversaryHasPriority || showDisclaimer || showImportRecoveryPrompt || showAuthorLetter || showUpdateNotification || shouldShowUpdateNotification() || showQixiLaunchPopup || showLike520Popup || showBackupReminder}
+       />
        {/* 「该备份啦」提醒（local-first 数据只在本机，隔 N 天没导出弹一次） */}
        {!anniversaryHasPriority && !showDisclaimer && !showImportRecoveryPrompt && !showAuthorLetter && !showUpdateNotification && !showQixiLaunchPopup && !showLike520Popup && showBackupReminder && (
          <BackupReminderController

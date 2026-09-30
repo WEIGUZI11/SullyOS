@@ -158,6 +158,8 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            // Only load the image renderer when exporting a beauty preview.
+            if (id.includes('html2canvas')) return 'beauty-preview-renderer';
             // Local camera emotion calibration is opt-in. Keep MediaPipe out of
             // the preloaded common vendor so its JS is fetched only after the
             // user explicitly enables their camera.
@@ -176,7 +178,9 @@ export default defineConfig({
             if (id.includes('untitled-pixi-live2d-engine')) {
               return 'vendor-live2d-engine';
             }
-            if (id.includes('@pixi/') || /[\\/]node_modules[\\/]pixi\.js[\\/]/.test(id)) {
+            // Filters extend Pixi classes during module evaluation. Keeping them
+            // in common vendor creates vendor -> Pixi -> vendor TDZ cycles.
+            if (id.includes('pixi-filters') || id.includes('@pixi/') || /[\\/]node_modules[\\/]pixi\.js[\\/]/.test(id)) {
               return 'vendor-live2d';
             }
             if (id.includes('react') || id.includes('react-dom') || id.includes('scheduler')) {
