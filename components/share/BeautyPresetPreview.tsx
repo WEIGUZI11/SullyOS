@@ -1,5 +1,8 @@
+import {resolveCssImageUrls} from '../../utils/cssImageAssets';
 import {decorationPreviewScenes,decorationThumbnailPart,type DecorationThumbnailPart} from '../../utils/decorationPreviewScenes';
 import React, { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import {embedBeautyCaptureImages} from '../../utils/beautyCaptureAssets';
+import {renderIsolatedBeautyCapture, waitForBeautyCapture, waitForBeautyCaptureFonts} from '../../utils/beautyCaptureWait';
 import {enqueuePreviewBuild} from '../../utils/previewRenderQueue';
 import { beautyPreviewDocument, PREVIEW_WIDTH, PREVIEW_HEIGHT } from '../../utils/beautyPreview';
 import {bindDecorationPreview,type DecorationPreviewState} from '../../utils/decorationPreviewInteraction';
@@ -7,7 +10,7 @@ import {bindDecorationPreview,type DecorationPreviewState} from '../../utils/dec
 export interface BeautyPreviewHandle { capture: () => Promise<HTMLCanvasElement> }
 interface Props { data: unknown; compact?: boolean; sceneScope?: 'preset'|'all'; thumbnailPart?:DecorationThumbnailPart|'full' }
 function copyPaint(element: Element, scrolls: Array<[HTMLElement,number,number]>): HTMLElement {
-  const clone = element.cloneNode(false) as HTMLElement;
+  const clone = (element instanceof HTMLTextAreaElement ? document.createElement('div') : element.cloneNode(false)) as HTMLElement;
   const computed = getComputedStyle(element);
   for (const key of Array.from(computed)) clone.style.setProperty(key, computed.getPropertyValue(key));
   // Freeze pseudo-element appearance without copying the author's CSS selectors.
@@ -19,6 +22,11 @@ function copyPaint(element: Element, scrolls: Array<[HTMLElement,number,number]>
     if (/^["']/.test(css.content)) part.textContent = css.content.slice(1, -1);
     clone.append(part);
   };
+  if (element instanceof HTMLTextAreaElement) {
+    clone.textContent = element.value || element.placeholder;
+    if (!element.value) clone.style.color = getComputedStyle(element, '::placeholder').color;
+    return clone;
+  }
   pseudo('::before');
   for (const node of Array.from(element.childNodes)) {
     if (node instanceof Element && node.tagName !== 'STYLE') clone.append(copyPaint(node,scrolls));
@@ -31,6 +39,8 @@ function copyPaint(element: Element, scrolls: Array<[HTMLElement,number,number]>
 export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPresetPreview({ data, compact = false, sceneScope = 'preset', thumbnailPart }, ref) {
   const host = useRef<HTMLDivElement>(null);
   const container = useRef<HTMLDivElement>(null);
+  const activeCapture = useRef<AbortController|null>(null);
+  useEffect(() => () => activeCapture.current?.abort(), []);
   const [width, setWidth] = useState(PREVIEW_WIDTH);
   const [desktopPage, setDesktopPage] = useState(0);
   const [desktopPages, setDesktopPages] = useState(1);
@@ -57,7 +67,7 @@ export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPreset
   useEffect(() => {
     if(!visible)return;
     setReady(false); setError('');
-    let alive = true;let cleanup:undefined|(()=>void);
+    let alive = true;let cleanup:undefined|(()=>void);let releaseImages:undefined|(()=>void);
     const build = async () => { try {
       const sample = isChat
         ? await import('../chat/ChatDecorationSample').then(module=>alive?module.renderChatDecorationSample(data,sceneId,part,liveState):null)
@@ -72,6 +82,9 @@ export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPreset
       // Only text CSS and our own escaped sample markup cross this boundary, never scripts.
       shadow.adoptedStyleSheets=[];
       style.textContent = sample ? sample.css+'\n*{animation:none!important;transition:none!important;pointer-events:none!important}.sample-messages,.no-scrollbar{pointer-events:auto!important}'+(!compact?'[data-preview-action],[data-preview-action] *,[data-preview-backdrop],.sully-chat-transfer-dialog{pointer-events:auto!important}[data-preview-action]:focus-visible{outline:2px solid #8a72ad!important;outline-offset:2px}':'') : (parsed.querySelector('style')?.textContent || '').replace('html,body{', '.beauty-preview-body{').replace('body{background:', '.beauty-preview-body{background:');
+      const images = await resolveCssImageUrls(style.textContent || '');
+      if (!alive) {images.dispose(); return;}
+      releaseImages = images.dispose; style.textContent = images.css;
       const body = document.createElement('div'); body.className = 'beauty-preview-body';
       for (const child of Array.from(parsed.body.children)) body.append(child.cloneNode(true));
       shadow.replaceChildren(style, body);
@@ -83,10 +96,10 @@ export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPreset
       // Preset :host selectors cannot resize, position or expose the host outside its clip.
       for (const [key, value] of Object.entries({ width: '360px', height: `${height}px`, display: 'block', position: 'relative', overflow: 'hidden', contain: 'strict', 'pointer-events': compact ? 'none' : 'auto' })) host.current.style.setProperty(key, value, 'important');
       setReady(true);
-    } catch (e) { if(alive)setError(e instanceof Error ? e.message : '预览失败'); } };
+    } catch (e) { releaseImages?.(); if(alive)setError(e instanceof Error ? e.message : '预览失败'); } };
     const cancel=compact?enqueuePreviewBuild(build):undefined;
     if(!compact)void build();
-    return () => {alive=false;cancel?.();cleanup?.();};
+    return () => {alive=false;cancel?.();cleanup?.();releaseImages?.();};
   }, [data,sceneId,isChat,compact,part,height,liveState,desktopPage,visible]);
   useEffect(() => {
     if (!container.current) return;
@@ -97,21 +110,24 @@ export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPreset
     capture: async () => {
       const element = host.current;
       if (!ready || !element?.shadowRoot) throw Error('预览尚未加载完成，请稍后再试');
-      await document.fonts.ready;
-      const { default: html2canvas } = await import('html2canvas');
       const body = element.shadowRoot.querySelector<HTMLElement>('.beauty-preview-body');
       if (!body) throw Error('预览内容尚未就绪');
-      const scrolls:Array<[HTMLElement,number,number]>=[];
-      const snapshot = copyPaint(body,scrolls);
-      const holder = document.createElement('div');
-      holder.style.cssText = `position:fixed;left:-10000px;top:0;width:360px;height:${height}px;overflow:hidden;pointer-events:none;contain:strict`;
-      holder.append(snapshot); document.body.append(holder);
-      for(const [element,top,left] of scrolls){element.scrollTop=top;element.scrollLeft=left;}
+      activeCapture.current?.abort();
+      const controller = new AbortController(); activeCapture.current = controller;
+      let stage = '预览字体加载';
+      const timeout = window.setTimeout(() => controller.abort(Error(`${stage}超时，请检查网络后重试；不会提交未完成的封面。`)), 30000);
       try {
-        // html2canvas flattens Shadow DOM into its clone. Exclude all original previews
-        // so untrusted selectors cannot see the rest of the app in that temporary clone.
-        return await html2canvas(snapshot, { scale: 2, width: PREVIEW_WIDTH, height, backgroundColor: null, useCORS: true, imageTimeout: 8000, logging: false, ignoreElements: node => node.hasAttribute('data-beauty-preview-source') });
-      } finally { holder.remove(); }
+        await waitForBeautyCaptureFonts(body, controller.signal);
+        const scrolls:Array<[HTMLElement,number,number]>=[];
+        const snapshot = copyPaint(body,scrolls);
+        stage = '封面图片加载';
+        await waitForBeautyCapture(embedBeautyCaptureImages(snapshot, controller.signal), controller.signal);
+        stage = '封面绘制';
+        return await renderIsolatedBeautyCapture(snapshot, PREVIEW_WIDTH, height, controller.signal, scrolls);
+      } finally {
+        clearTimeout(timeout);
+        if (activeCapture.current === controller) activeCapture.current = null;
+      }
     },
   }), [ready,height]);
   return <div className="beauty-preset-preview" data-thumbnail-part={part} ref={container}>
@@ -125,6 +141,6 @@ export default memo(forwardRef<BeautyPreviewHandle, Props>(function BeautyPreset
     <div style={{ height: height * width / PREVIEW_WIDTH, width, margin: 'auto', overflow: 'hidden', borderRadius: 20 }}>
       <div ref={host} data-beauty-preview-source role={isChat&&!compact?'group':'img'} aria-label="美化预设搭配预览" style={{ width: PREVIEW_WIDTH, height, transform: `scale(${width / PREVIEW_WIDTH})`, transformOrigin: 'top left' }}/>
     </div>
-    {!compact && <p className="beauty-preview-caption">{isChat && sceneId==='journal-app'?'交换日记样式预览 · 示例日记本，不读取真实内容。':isChat && sceneId==='schedule-card' ? '日程表样式预览 · 示例日程，不读取真实安排。' : isChat ? <>试着点击心象、转账卡或聊天加号 · 仅演示，不影响真实聊天。 <button type="button" onClick={()=>setInteraction(null)}>重置演示</button></> : desktopPages > 1 ? '桌面预览 · 示例角色与消息，未应用到本机。' : '特殊皮肤示意预览 · 不代表实际桌面布局。'}</p>}
+    {!compact && <p className="beauty-preview-caption">{isChat && (sceneId==='date-reading'||sceneId==='story-reading')?'阅读界面样式预览 · 仅使用虚构文字。':isChat && sceneId==='journal-app'?'交换日记样式预览 · 示例日记本，不读取真实内容。':isChat && sceneId==='schedule-card' ? '日程表样式预览 · 示例日程，不读取真实安排。' : isChat ? <>试着点击心象、转账卡或聊天加号 · 仅演示，不影响真实聊天。 <button type="button" onClick={()=>setInteraction(null)}>重置演示</button></> : desktopPages > 1 ? '桌面预览 · 示例角色与消息，未应用到本机。' : '特殊皮肤示意预览 · 不代表实际桌面布局。'}</p>}
   </div>;
 }));
