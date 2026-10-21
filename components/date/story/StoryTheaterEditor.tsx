@@ -18,11 +18,6 @@ interface Props {
     onOpenMaskBox: (draft: StoryTheaterEntry) => void;
 }
 
-const localDateTime = (timestamp = Date.now()): string => {
-    const date = new Date(timestamp - new Date(timestamp).getTimezoneOffset() * 60_000);
-    return date.toISOString().slice(0, 16);
-};
-
 const Toggle: React.FC<{ value: boolean; onChange: (value: boolean) => void; label?: string }> = ({ value, onChange, label }) => <button type='button' aria-label={label} aria-pressed={value} onClick={() => onChange(!value)} className={`w-11 h-6 shrink-0 rounded-full p-1 transition-colors ${value ? 'bg-violet-600' : 'bg-slate-200'}`}><span className={`block w-4 h-4 rounded-full bg-white transition-transform ${value ? 'translate-x-5' : ''}`} /></button>;
 
 const StoryTheaterEditor: React.FC<Props> = ({ initial, characters, user, masks, maskLocked, presets, onCancel, onSave, onImportPreset, onEditPreset, onOpenMaskBox }) => {
@@ -51,7 +46,6 @@ const StoryTheaterEditor: React.FC<Props> = ({ initial, characters, user, masks,
             ...current,
             characterIds,
             selectedWorldbookIds: adding ? Array.from(new Set([...current.selectedWorldbookIds, ...(char.mountedWorldbooks || []).map(book => book.id)])) : current.selectedWorldbookIds.filter(id => validBooks.has(id)),
-            characterMemoryDates: { ...current.characterMemoryDates, ...(adding && !current.characterMemoryDates[char.id] ? { [char.id]: localDateTime() } : {}) },
             characterContextLimits: { ...current.characterContextLimits, ...(adding && !current.characterContextLimits[char.id] ? { [char.id]: 100 } : {}) },
             updatedAt: Date.now(),
         };
@@ -104,11 +98,11 @@ const StoryTheaterEditor: React.FC<Props> = ({ initial, characters, user, masks,
                 {maskLocked && <p className='mt-2 text-[10px] text-slate-400'>故事开始后，真实/虚构模式也会固定；虚构剧场的记忆输入仍可单独调整。</p>}
                 {draft.writesToCharacterMemory ? <div className='mt-5 p-4 rounded-2xl bg-amber-50 border border-amber-200'>
                     <div className='text-xs font-bold text-amber-800'>记忆输入与输出都会开启</div>
-                    <p className='mt-1 text-[10px] leading-5 text-amber-700'>会读取角色既有记忆；你写的内容与故事正文也会分别进入每位角色的正常记忆，沿用陪伴模式的水位线和总结时机。</p>
+                    <p className='mt-1 text-[10px] leading-5 text-amber-700'>会读取角色既有记忆；你写的内容与故事正文也会分别进入每位角色的正常记忆，作为你们的共同经历。</p>
+                    <p className='mt-2 text-[10px] leading-5 text-amber-700'>跟随真实时间：你的输入和角色回复会按各自实际发送的时间记录，无需设置日期。正文中的虚构日期不会改变聊天记录的时间与顺序；如果不希望故事成为共同记忆，请在开始前选择「虚构剧场」。</p>
                     <p className='mt-2 pt-2 border-t border-amber-200 text-[10px] leading-5 font-semibold text-amber-800'>内置真实性保护：角色不能捏造和你的共同记忆，也不能给已有记忆添油加醋。</p>
-                    <div className='mt-3 space-y-3'>{memoryParticipants.map(char => <label key={char.id} className='flex items-center gap-3'><span className='w-20 text-xs font-semibold truncate'>{char.name}</span><input type='datetime-local' value={draft.characterMemoryDates[char.id] || localDateTime()} onChange={event => update('characterMemoryDates', { ...draft.characterMemoryDates, [char.id]: event.target.value })} className='min-w-0 flex-1 px-3 py-2 rounded-xl bg-white border border-amber-200 text-xs' /></label>)}</div>
                 </div> : <div className='mt-5 space-y-5'>
-                    <div className='py-3 border-y border-slate-200 flex items-center justify-between'><div><div className='text-sm font-semibold'>记忆输出</div><p className='mt-1 text-[10px] text-slate-500'>虚构内容绝不会写进任何角色记忆。</p></div><span className='px-2 py-1 rounded-full bg-slate-200 text-[9px] font-bold text-slate-500'>永久关闭</span></div>
+                    <div className='py-3 border-y border-slate-200 flex items-center justify-between gap-3'><div><div className='text-sm font-semibold'>自动记忆输出</div><p className='mt-1 text-[10px] leading-5 text-slate-500'>虚构时间与经历不会自动写入角色的正常记忆。需要保留时，可在剧情右上角「事件盒」选择摘要、填写日期，手动转为带剧情来源的记忆。</p></div><span className='shrink-0 px-2 py-1 rounded-full bg-slate-200 text-[9px] font-bold text-slate-500'>关闭</span></div>
                     <div className='flex items-start justify-between gap-5'><div><div className='text-sm font-semibold'>记忆输入</div><p className='mt-1 text-[10px] text-slate-500'>默认关闭；打开后角色会带着既有记忆进入虚构故事。关闭时只读取名字、核心指令和世界观。</p></div><Toggle value={draft.carryCharacterMemory} onChange={value => update('carryCharacterMemory', value)} /></div>
                     {draft.carryCharacterMemory && <div className='space-y-2'>{memoryParticipants.map(char => <label key={char.id} className='flex items-center gap-3 text-xs'><span className='flex-1 truncate'>{char.name}{draft.mask?.type === 'character' && draft.mask.id === char.id ? '（当前身份）' : ''} 最近原文</span><input type='number' min={0} max={500} value={draft.characterContextLimits[char.id] ?? 100} onChange={event => update('characterContextLimits', { ...draft.characterContextLimits, [char.id]: Math.max(0, Math.min(500, Number(event.target.value) || 0)) })} className='w-20 px-3 py-2 rounded-xl bg-white border border-slate-200 text-right' /><span className='text-slate-400'>条</span></label>)}</div>}
                     <div><div className='text-sm font-semibold'>归档方式</div><div className='mt-2 grid grid-cols-2 p-1 rounded-xl bg-slate-200'><button onClick={() => update('archiveStrategy', 'summary')} className={`py-2 rounded-lg text-[11px] font-bold ${draft.archiveStrategy === 'summary' ? 'bg-white shadow-sm' : 'text-slate-500'}`}>事件盒</button><button onClick={() => update('archiveStrategy', 'vector')} className={`py-2 rounded-lg text-[11px] font-bold ${draft.archiveStrategy === 'vector' ? 'bg-white shadow-sm' : 'text-slate-500'}`}>独立向量</button></div></div>
@@ -124,7 +118,7 @@ const StoryTheaterEditor: React.FC<Props> = ({ initial, characters, user, masks,
                 <div className='mt-3 divide-y divide-slate-100 border-y border-slate-200'>{books.length === 0 ? <div className='py-6 text-center text-xs text-slate-400'>所选角色没有挂载世界书</div> : books.map(book => { const selected = draft.selectedWorldbookIds.includes(book.id); return <button key={book.id} onClick={() => update('selectedWorldbookIds', selected ? draft.selectedWorldbookIds.filter(id => id !== book.id) : [...draft.selectedWorldbookIds, book.id])} className='w-full py-3 flex items-center gap-3 text-left'><span className={`w-4 h-4 rounded border text-[10px] text-center text-white ${selected ? 'bg-violet-600 border-violet-600' : 'border-slate-300'}`}>{selected ? '✓' : ''}</span><span className='min-w-0'><span className='block text-xs font-semibold truncate'>{book.title}</span><span className='block text-[9px] text-slate-400'>{book.category || '未分类'}</span></span></button>; })}</div>
             </section>
             <section className='pt-6 border-t border-slate-200'>
-                <div className='text-[9px] tracking-[.22em] uppercase font-bold text-violet-500'>05 / Preset</div><h2 className='mt-1 text-lg font-semibold'>装载剧情预设</h2><p className='text-[10px] text-slate-500'>只接受糯米机原生 sullyos.story-preset；内置预设复制后可编辑。</p>
+                <div className='text-[9px] tracking-[.22em] uppercase font-bold text-violet-500'>05 / Preset</div><h2 className='mt-1 text-lg font-semibold'>装载剧情预设</h2><p className='text-[10px] text-slate-500'>只支持糯米机专属剧情预设文件；内置预设复制后可编辑。</p>
                 <div className='mt-3 flex gap-2'><select value={preset?.id || ''} onChange={event => setDraft(current => ({ ...current, presetId: event.target.value, presetOverride: undefined, updatedAt: Date.now() }))} className='min-w-0 flex-1 px-3 py-3 rounded-xl bg-white border border-slate-200 text-xs'>{presets.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><button onClick={() => fileInput.current?.click()} className='w-11 rounded-xl bg-white border border-slate-200 grid place-items-center'><UploadSimple size={18} /></button><button disabled={!preset} onClick={() => { if (preset) void downloadStoryPreset(preset); }} className='w-11 rounded-xl bg-white border border-slate-200 grid place-items-center disabled:opacity-30'><DownloadSimple size={18} /></button></div>
                 <input ref={fileInput} type='file' accept='.json,.png,application/json,image/png' className='hidden' onChange={async event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; if (!file) return; const imported = await onImportPreset(file); if (imported) setDraft(current => ({ ...current, presetId: imported.id, presetOverride: undefined, updatedAt: Date.now() })); }} />
                 {preset && <div className='mt-3 flex items-center justify-between'><span className='text-[10px] text-slate-500'>启用 {presetStats.enabled}/{presetStats.total} 条 · 按当前顺序与插入位置发送</span><button onClick={() => onEditPreset(preset, draft)} className='text-[10px] font-bold text-violet-600'>打开制作器</button></div>}
